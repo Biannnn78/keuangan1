@@ -1,0 +1,942 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { AlertTriangle, Home, DollarSign, Target, Settings, BarChart3, PlusCircle, Trash2, Edit } from 'lucide-react';
+
+// --- TIPE DATA UTAMA ---
+type View = 'Dashboard' | 'Transaksi' | 'Anggaran' | 'Tabungan' | 'Laporan' | 'Profil';
+
+interface Transaction {
+  id: string;
+  date: string; // YYYY-MM-DD
+  description: string;
+  amount: number;
+  type: 'Pemasukan' | 'Pengeluaran';
+  category: string;
+  isBusiness: boolean;
+}
+
+interface Budget {
+  id: string;
+  category: string;
+  limit: number;
+  spent: number;
+}
+
+interface SavingGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  targetDate: string;
+}
+
+interface UserProfile {
+  name: string;
+  currency: string;
+  showBusiness: boolean;
+}
+
+// --- DATA SIMULASI AWAL ---
+const initialProfile: UserProfile = {
+  name: 'Pengguna Gemini',
+  currency: 'IDR',
+  showBusiness: true,
+};
+
+const initialTransactions: Transaction[] = [
+  { id: 't1', date: '2024-10-01', description: 'Gaji Bulanan', amount: 15000000, type: 'Pemasukan', category: 'Gaji', isBusiness: false },
+  { id: 't2', date: '2024-10-02', description: 'Sewa Kantor', amount: 5000000, type: 'Pengeluaran', category: 'Operasional', isBusiness: true },
+  { id: 't3', date: '2024-10-05', description: 'Belanja Mingguan', amount: 800000, type: 'Pengeluaran', category: 'Kebutuhan', isBusiness: false },
+  { id: 't4', date: '2024-10-10', description: 'Penjualan Produk A', amount: 3500000, type: 'Pemasukan', category: 'Penjualan', isBusiness: true },
+];
+
+const initialBudgets: Budget[] = [
+  { id: 'b1', category: 'Kebutuhan', limit: 4000000, spent: 800000 },
+  { id: 'b2', category: 'Transportasi', limit: 1000000, spent: 300000 },
+];
+
+const initialSavings: SavingGoal[] = [
+  { id: 's1', name: 'Dana Darurat', targetAmount: 50000000, currentAmount: 12500000, targetDate: '2025-12-31' },
+  { id: 's2', name: 'Liburan Bali', targetAmount: 10000000, currentAmount: 3000000, targetDate: '2025-06-01' },
+];
+
+const CATEGORIES = {
+  Pemasukan: ['Gaji', 'Penjualan', 'Investasi', 'Lainnya'],
+  Pengeluaran: ['Kebutuhan', 'Operasional', 'Transportasi', 'Makan', 'Hiburan', 'Tagihan', 'Lainnya'],
+};
+
+// --- FUNGSI UTILITAS ---
+
+/** Format angka menjadi mata uang (contoh: 15000000 -> IDR 15.000.000) */
+const formatCurrency = (amount: number, currency: string): string => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
+
+// --- KOMPONEN UI DASAR ---
+
+const Card: React.FC<{ title: string; children: React.ReactNode; className?: string }> = ({ title, children, className = '' }) => (
+  <div className={`p-5 bg-white shadow-xl rounded-xl border border-gray-100 ${className}`}>
+    <h3 className="text-lg font-semibold text-gray-700 mb-3">{title}</h3>
+    {children}
+  </div>
+);
+
+const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({ children, className = '', ...props }) => (
+  <button
+    className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 ${className}`}
+    {...props}
+  >
+    {children}
+  </button>
+);
+
+const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
+  <input
+    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+    {...props}
+  />
+);
+
+const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { options: string[] }> = ({ options, ...props }) => (
+  <select
+    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-white appearance-none"
+    {...props}
+  >
+    {options.map(option => (
+      <option key={option} value={option}>{option}</option>
+    ))}
+  </select>
+);
+
+// --- KOMPONEN VIEW SPESIFIK ---
+
+interface AppProps {}
+
+const App: React.FC<AppProps> = () => {
+  const [activeView, setActiveView] = useState<View>('Dashboard');
+  const [profile, setProfile] = useState<UserProfile>(initialProfile);
+  const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
+  const [budgets, setBudgets] = useState<Budget[]>(initialBudgets);
+  const [savings, setSavings] = useState<SavingGoal[]>(initialSavings);
+
+  // Filter transaksi berdasarkan preferensi bisnis/pribadi
+  const filteredTransactions = useMemo(() => {
+    if (profile.showBusiness) return transactions;
+    return transactions.filter(t => !t.isBusiness);
+  }, [transactions, profile.showBusiness]);
+
+  const handleUpdateProfile = (newProfile: UserProfile) => {
+    setProfile(newProfile);
+  };
+
+  const handleAddTransaction = (newTransaction: Omit<Transaction, 'id'>) => {
+    const newT: Transaction = { ...newTransaction, id: Date.now().toString() };
+    setTransactions(prev => [newT, ...prev]);
+
+    // Simulasi update budget saat ada pengeluaran
+    if (newT.type === 'Pengeluaran') {
+      setBudgets(prevBudgets => prevBudgets.map(b =>
+        b.category === newT.category
+          ? { ...b, spent: b.spent + newT.amount }
+          : b
+      ));
+    }
+  };
+
+  const handleDeleteTransaction = (id: string) => {
+    setTransactions(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleAddBudget = (category: string, limit: number) => {
+    const newB: Budget = { id: Date.now().toString(), category, limit, spent: 0 };
+    setBudgets(prev => [...prev, newB]);
+  };
+
+  const handleDeleteBudget = (id: string) => {
+    setBudgets(prev => prev.filter(b => b.id !== id));
+  };
+
+  const handleUpdateSaving = (id: string, amount: number) => {
+    setSavings(prev => prev.map(s =>
+      s.id === id ? { ...s, currentAmount: s.currentAmount + amount } : s
+    ));
+  };
+
+  const handleAddSavingGoal = (name: string, targetAmount: number, targetDate: string) => {
+    const newS: SavingGoal = { id: Date.now().toString(), name, targetAmount, currentAmount: 0, targetDate };
+    setSavings(prev => [...prev, newS]);
+  };
+
+  // --- RENDERING VIEW BERDASARKAN activeView ---
+
+  const renderView = () => {
+    switch (activeView) {
+      case 'Dashboard':
+        return <DashboardView transactions={filteredTransactions} budgets={budgets} savings={savings} profile={profile} />;
+      case 'Transaksi':
+        return <TransactionsView transactions={filteredTransactions} profile={profile} onAdd={handleAddTransaction} onDelete={handleDeleteTransaction} />;
+      case 'Anggaran':
+        return <BudgetView budgets={budgets} profile={profile} onAdd={handleAddBudget} onDelete={handleDeleteBudget} />;
+      case 'Tabungan':
+        return <SavingsView savings={savings} profile={profile} onUpdate={handleUpdateSaving} onAdd={handleAddSavingGoal} />;
+      case 'Laporan':
+        return <ReportsView transactions={filteredTransactions} profile={profile} />;
+      case 'Profil':
+        return <ProfileView profile={profile} onUpdate={handleUpdateProfile} />;
+      default:
+        return <DashboardView transactions={filteredTransactions} budgets={budgets} savings={savings} profile={profile} />;
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-gray-50 font-inter">
+      <Sidebar activeView={activeView} setActiveView={setActiveView} profile={profile} />
+      <main className="flex-1 overflow-auto p-6 md:p-8">
+        <h1 className="text-3xl font-bold text-gray-800 mb-6">{activeView}</h1>
+        {renderView()}
+      </main>
+    </div>
+  );
+};
+export default App;
+
+// --- Sidebar Component ---
+const Sidebar: React.FC<{ activeView: View; setActiveView: (view: View) => void; profile: UserProfile }> = ({ activeView, setActiveView, profile }) => {
+  const navItems: { view: View; icon: React.ElementType }[] = [
+    { view: 'Dashboard', icon: Home },
+    { view: 'Transaksi', icon: DollarSign },
+    { view: 'Anggaran', icon: Target },
+    { view: 'Tabungan', icon: PlusCircle },
+    { view: 'Laporan', icon: BarChart3 },
+    { view: 'Profil', icon: Settings },
+  ];
+
+  return (
+    <div className="w-64 bg-indigo-800 text-white flex flex-col p-4 shadow-2xl">
+      <div className="flex items-center space-x-2 p-2 mb-8">
+        <DollarSign className="w-8 h-8 text-indigo-300" />
+        <span className="text-xl font-extrabold tracking-wider">FinMan</span>
+      </div>
+
+      <p className="text-sm font-semibold text-indigo-300 mb-2">Halo, {profile.name.split(' ')[0]}</p>
+      <div className="flex-1 space-y-2">
+        {navItems.map(({ view, icon: Icon }) => (
+          <button
+            key={view}
+            onClick={() => setActiveView(view)}
+            className={`flex items-center w-full p-3 rounded-xl transition-colors duration-200 ${
+              activeView === view
+                ? 'bg-indigo-700 font-bold shadow-lg ring-2 ring-white/50'
+                : 'hover:bg-indigo-700/50'
+            }`}
+          >
+            <Icon className="w-5 h-5 mr-3" />
+            <span className="text-sm">{view}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// --- Dashboard View Component ---
+const DashboardView: React.FC<{ transactions: Transaction[]; budgets: Budget[]; savings: SavingGoal[]; profile: UserProfile }> = ({ transactions, budgets, savings, profile }) => {
+  const { totalIncome, totalExpense, netBalance, monthlySummaryData, expenseByCategoryData } = useMemo(() => {
+    const totalIncome = transactions
+      .filter(t => t.type === 'Pemasukan')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const totalExpense = transactions
+      .filter(t => t.type === 'Pengeluaran')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const netBalance = totalIncome - totalExpense;
+
+    // Data untuk Chart Garis (Simulasi Bulanan)
+    const monthlySummary: { [key: string]: { Pemasukan: number; Pengeluaran: number } } = {};
+    transactions.forEach(t => {
+      const monthYear = t.date.substring(0, 7); // YYYY-MM
+      if (!monthlySummary[monthYear]) {
+        monthlySummary[monthYear] = { Pemasukan: 0, Pengeluaran: 0 };
+      }
+      monthlySummary[monthYear][t.type] += t.amount;
+    });
+
+    const monthlySummaryData = Object.keys(monthlySummary).sort().map(monthYear => ({
+      name: monthYear,
+      Pemasukan: monthlySummary[monthYear].Pemasukan,
+      Pengeluaran: monthlySummary[monthYear].Pengeluaran,
+    }));
+
+    // Data untuk Chart Lingkaran (Pengeluaran per Kategori)
+    const expenseByCategory: { [key: string]: number } = {};
+    transactions
+      .filter(t => t.type === 'Pengeluaran')
+      .forEach(t => {
+        expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
+      });
+
+    const expenseByCategoryData = Object.keys(expenseByCategory).map(category => ({
+      name: category,
+      value: expenseByCategory[category],
+    }));
+
+    return { totalIncome, totalExpense, netBalance, monthlySummaryData, expenseByCategoryData };
+  }, [transactions]);
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#A288FF', '#FF6663'];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card title="Saldo Bersih" className="bg-indigo-600 text-white">
+          <p className="text-3xl font-extrabold">{formatCurrency(netBalance, profile.currency)}</p>
+          <p className="text-sm opacity-80 mt-1">Perkiraan hingga saat ini</p>
+        </Card>
+        <Card title="Total Pemasukan" className="bg-green-100 text-green-700">
+          <p className="text-2xl font-bold">{formatCurrency(totalIncome, profile.currency)}</p>
+          <p className="text-sm mt-1">Total pemasukan bulan ini</p>
+        </Card>
+        <Card title="Total Pengeluaran" className="bg-red-100 text-red-700">
+          <p className="text-2xl font-bold">{formatCurrency(totalExpense, profile.currency)}</p>
+          <p className="text-sm mt-1">Total pengeluaran bulan ini</p>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card title="Tren Keuangan Bulanan">
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={monthlySummaryData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis tickFormatter={(value) => formatCurrency(value, profile.currency)} stroke="#6b7280" />
+                <Tooltip formatter={(value: number) => formatCurrency(value, profile.currency)} />
+                <Legend />
+                <Line type="monotone" dataKey="Pemasukan" stroke="#4c51bf" activeDot={{ r: 8 }} strokeWidth={2} />
+                <Line type="monotone" dataKey="Pengeluaran" stroke="#ef4444" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card title="Pengeluaran Berdasarkan Kategori">
+          <div className="h-64 w-full flex justify-center items-center">
+            {expenseByCategoryData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={expenseByCategoryData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    labelLine={false}
+                    fill="#8884d8"
+                  >
+                    {expenseByCategoryData.map((_entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => formatCurrency(value, profile.currency)} />
+                  <Legend layout="vertical" verticalAlign="middle" align="right" />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-gray-500">Belum ada data pengeluaran.</p>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card title="Status Anggaran">
+          <div className="space-y-3">
+            {budgets.length === 0 && <p className="text-gray-500">Belum ada anggaran yang diatur.</p>}
+            {budgets.map(b => {
+              const percentage = (b.spent / b.limit) * 100;
+              const isOverspent = b.spent > b.limit;
+              return (
+                <div key={b.id} className="p-3 bg-gray-50 rounded-lg">
+                  <div className="flex justify-between text-sm font-medium">
+                    <span className="text-gray-700">{b.category}</span>
+                    <span className={isOverspent ? 'text-red-600 font-bold' : 'text-indigo-600'}>
+                      {formatCurrency(b.spent, profile.currency)} / {formatCurrency(b.limit, profile.currency)}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1">
+                    <div
+                      className={`h-2.5 rounded-full ${isOverspent ? 'bg-red-500' : 'bg-green-500'}`}
+                      style={{ width: `${Math.min(percentage, 100)}%` }}
+                    />
+                  </div>
+                  {isOverspent && <p className="text-xs text-red-500 mt-1">Anggaran terlampaui!</p>}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card title="Progress Tabungan">
+          <div className="space-y-4">
+            {savings.length === 0 && <p className="text-gray-500">Belum ada tujuan tabungan.</p>}
+            {savings.map(s => {
+              const percentage = (s.currentAmount / s.targetAmount) * 100;
+              const remaining = s.targetAmount - s.currentAmount;
+              return (
+                <div key={s.id} className="p-3 border border-indigo-200 rounded-lg">
+                  <p className="font-semibold text-indigo-700">{s.name}</p>
+                  <div className="flex justify-between text-xs mt-1 text-gray-600">
+                    <span>Target: {formatCurrency(s.targetAmount, profile.currency)}</span>
+                    <span>Sisa: {formatCurrency(remaining, profile.currency)}</span>
+                  </div>
+                  <div className="w-full bg-indigo-100 rounded-full h-2.5 mt-2">
+                    <div
+                      className="h-2.5 rounded-full bg-indigo-500 transition-all duration-500"
+                      style={{ width: `${Math.min(percentage, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-right text-xs mt-1 text-indigo-600 font-medium">{percentage.toFixed(1)}% tercapai</p>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// --- Transactions View Component ---
+const TransactionsView: React.FC<{ transactions: Transaction[]; profile: UserProfile; onAdd: (t: Omit<Transaction, 'id'>) => void; onDelete: (id: string) => void }> = ({ transactions, profile, onAdd, onDelete }) => {
+  const [formState, setFormState] = useState<Omit<Transaction, 'id'>>({
+    date: new Date().toISOString().substring(0, 10),
+    description: '',
+    amount: 0,
+    type: 'Pengeluaran',
+    category: CATEGORIES.Pengeluaran[0],
+    isBusiness: false,
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    if (name === 'isBusiness' && type === 'checkbox') {
+      setFormState(prev => ({ ...prev, [name]: (e.target as HTMLInputElement).checked }));
+    } else if (name === 'amount') {
+      setFormState(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
+    } else {
+      setFormState(prev => ({ ...prev, [name]: value }));
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (formState.description && formState.amount > 0) {
+      onAdd(formState);
+      setFormState({
+        date: new Date().toISOString().substring(0, 10),
+        description: '',
+        amount: 0,
+        type: 'Pengeluaran',
+        category: CATEGORIES.Pengeluaran[0],
+        isBusiness: false,
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card title="Catat Transaksi Baru">
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="lg:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Deskripsi</label>
+            <Input name="description" value={formState.description} onChange={handleChange} placeholder="Contoh: Beli Kopi" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tipe</label>
+            <Select name="type" options={['Pengeluaran', 'Pemasukan']} value={formState.type} onChange={handleChange} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Kategori</label>
+            <Select name="category" options={CATEGORIES[formState.type]} value={formState.category} onChange={handleChange} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah ({profile.currency})</label>
+            <Input name="amount" type="number" step="1000" min="1" value={formState.amount > 0 ? formState.amount : ''} onChange={handleChange} required />
+          </div>
+          <div className="flex flex-col justify-end">
+            <div className="flex items-center space-x-2 h-10">
+              <input
+                id="isBusiness"
+                name="isBusiness"
+                type="checkbox"
+                checked={formState.isBusiness}
+                onChange={handleChange}
+                className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300"
+              />
+              <label htmlFor="isBusiness" className="text-sm font-medium text-gray-700">Bisnis</label>
+            </div>
+          </div>
+          <div className="lg:col-span-6 flex justify-end">
+            <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md">
+              <PlusCircle className="w-4 h-4 mr-2" />
+              Simpan Transaksi
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      <Card title="Riwayat Transaksi">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deskripsi</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipe</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Jumlah</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {transactions.length === 0 && (
+                <tr><td colSpan={6} className="px-6 py-4 text-center text-gray-500">Tidak ada transaksi ditemukan.</td></tr>
+              )}
+              {transactions.map(t => (
+                <tr key={t.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{t.date}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {t.description} {t.isBusiness && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">Bisnis</span>}
+                  </td>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${t.type === 'Pemasukan' ? 'text-green-600' : 'text-red-600'}`}>{t.type}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{t.category}</td>
+                  <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-semibold ${t.type === 'Pemasukan' ? 'text-green-700' : 'text-red-700'}`}>
+                    {formatCurrency(t.amount, profile.currency)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <Button onClick={() => onDelete(t.id)} className="text-red-600 hover:text-red-800 p-1 bg-transparent hover:bg-red-50" title="Hapus">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// --- Budget View Component ---
+const BudgetView: React.FC<{ budgets: Budget[]; profile: UserProfile; onAdd: (category: string, limit: number) => void; onDelete: (id: string) => void }> = ({ budgets, profile, onAdd, onDelete }) => {
+  const [newCategory, setNewCategory] = useState(CATEGORIES.Pengeluaran[0]);
+  const [newLimit, setNewLimit] = useState(0);
+
+  const availableCategories = useMemo(() => {
+    const existingCategories = budgets.map(b => b.category);
+    return CATEGORIES.Pengeluaran.filter(c => !existingCategories.includes(c));
+  }, [budgets]);
+
+  useEffect(() => {
+    if (availableCategories.length > 0 && !budgets.find(b => b.category === newCategory)) {
+        setNewCategory(availableCategories[0]);
+    }
+  }, [availableCategories, newCategory, budgets]);
+
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newCategory && newLimit > 0) {
+      onAdd(newCategory, newLimit);
+      setNewLimit(0);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card title="Atur Anggaran Baru">
+        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4 items-end">
+          <div className="flex-1 w-full">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Kategori</label>
+            <Select
+              name="category"
+              options={availableCategories}
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              required
+              disabled={availableCategories.length === 0}
+            />
+             {availableCategories.length === 0 && <p className="text-xs text-red-500 mt-1">Semua kategori sudah memiliki anggaran.</p>}
+          </div>
+          <div className="flex-1 w-full">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Batas Anggaran ({profile.currency})</label>
+            <Input
+              name="limit"
+              type="number"
+              step="1000"
+              min="1"
+              value={newLimit > 0 ? newLimit : ''}
+              onChange={(e) => setNewLimit(parseFloat(e.target.value) || 0)}
+              required
+              placeholder="Contoh: 4000000"
+              disabled={availableCategories.length === 0}
+            />
+          </div>
+          <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md w-full sm:w-auto" disabled={availableCategories.length === 0}>
+            <PlusCircle className="w-4 h-4 mr-2" />
+            Tambah Anggaran
+          </Button>
+        </form>
+      </Card>
+
+      <Card title="Daftar Anggaran Bulanan">
+        <div className="space-y-4">
+          {budgets.length === 0 && <div className="text-gray-500 py-4">Tidak ada anggaran yang aktif.</div>}
+          {budgets.map(b => {
+            const percentage = (b.spent / b.limit) * 100;
+            const isOverspent = b.spent > b.limit;
+            const statusClass = isOverspent ? 'bg-red-500' : percentage >= 80 ? 'bg-yellow-500' : 'bg-green-500';
+
+            return (
+              <div key={b.id} className="p-4 border rounded-xl shadow-sm hover:shadow-md transition duration-150">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <p className="font-bold text-lg text-gray-800">{b.category}</p>
+                    <p className="text-sm text-gray-600">Terpakai: <span className="font-semibold">{formatCurrency(b.spent, profile.currency)}</span></p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-indigo-600">Batas: {formatCurrency(b.limit, profile.currency)}</p>
+                    <Button onClick={() => onDelete(b.id)} className="text-gray-400 hover:text-red-600 p-1 bg-transparent hover:bg-red-50 mt-1" title="Hapus Anggaran">
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
+                  <div
+                    className={`h-3 rounded-full ${statusClass}`}
+                    style={{ width: `${Math.min(percentage, 100)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs mt-1 text-gray-500">
+                  <span>{Math.round(percentage)}% Terpakai</span>
+                  {isOverspent && <span className="text-red-500 font-medium flex items-center"><AlertTriangle className="w-3 h-3 mr-1" /> Melebihi Batas!</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// --- Savings View Component ---
+const SavingsView: React.FC<{ savings: SavingGoal[]; profile: UserProfile; onUpdate: (id: string, amount: number) => void; onAdd: (name: string, targetAmount: number, targetDate: string) => void }> = ({ savings, profile, onUpdate, onAdd }) => {
+  const [goalName, setGoalName] = useState('');
+  const [targetAmount, setTargetAmount] = useState(0);
+  const [targetDate, setTargetDate] = useState('');
+  const [selectedGoalId, setSelectedGoalId] = useState('');
+  const [depositAmount, setDepositAmount] = useState(0);
+
+  const handleAddGoal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (goalName && targetAmount > 0 && targetDate) {
+      onAdd(goalName, targetAmount, targetDate);
+      setGoalName('');
+      setTargetAmount(0);
+      setTargetDate('');
+    }
+  };
+
+  const handleDeposit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedGoalId && depositAmount > 0) {
+      onUpdate(selectedGoalId, depositAmount);
+      setDepositAmount(0);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card title="Tambah Tujuan Tabungan Baru">
+        <form onSubmit={handleAddGoal} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nama Tujuan</label>
+            <Input name="goalName" value={goalName} onChange={(e) => setGoalName(e.target.value)} required placeholder="Contoh: Beli Mobil" />
+          </div>
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Target Jumlah ({profile.currency})</label>
+            <Input name="targetAmount" type="number" step="100000" min="100000" value={targetAmount > 0 ? targetAmount : ''} onChange={(e) => setTargetAmount(parseFloat(e.target.value) || 0)} required />
+          </div>
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal Target</label>
+            <Input name="targetDate" type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} required />
+          </div>
+          <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-md">
+            <PlusCircle className="w-4 h-4 mr-2" />
+            Buat Tujuan
+          </Button>
+        </form>
+      </Card>
+
+      <Card title="Setor/Tarik Dana Tabungan">
+        <form onSubmit={handleDeposit} className="flex flex-col sm:flex-row gap-4 items-end">
+          <div className="flex-1 w-full">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Tujuan</label>
+            <Select
+              name="selectedGoal"
+              options={['Pilih Tujuan...', ...savings.map(s => s.name)]}
+              value={savings.find(s => s.id === selectedGoalId)?.name || 'Pilih Tujuan...'}
+              onChange={(e) => setSelectedGoalId(savings.find(s => s.name === e.target.value)?.id || '')}
+              required
+            />
+          </div>
+          <div className="flex-1 w-full">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Setoran/Penarikan ({profile.currency})</label>
+            <Input
+              name="depositAmount"
+              type="number"
+              step="1000"
+              value={depositAmount > 0 ? depositAmount : ''}
+              onChange={(e) => setDepositAmount(parseFloat(e.target.value) || 0)}
+              required
+              placeholder="+500000 (Setor) atau -100000 (Tarik)"
+            />
+          </div>
+          <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white shadow-md w-full sm:w-auto" disabled={!selectedGoalId}>
+            <DollarSign className="w-4 h-4 mr-2" />
+            Proses Dana
+          </Button>
+        </form>
+      </Card>
+
+      <Card title="Daftar Tujuan Tabungan">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {savings.length === 0 && <div className="text-gray-500 py-4 col-span-full">Tidak ada tujuan tabungan yang diatur.</div>}
+          {savings.map(s => {
+            const progress = (s.currentAmount / s.targetAmount) * 100;
+            const remainingDays = Math.ceil((new Date(s.targetDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+            const isCompleted = s.currentAmount >= s.targetAmount;
+
+            return (
+              <div key={s.id} className={`p-4 rounded-xl shadow-md border ${isCompleted ? 'border-green-400 bg-green-50' : 'border-indigo-400 bg-indigo-50'}`}>
+                <h4 className="font-bold text-xl text-indigo-800">{s.name}</h4>
+                <p className="text-sm text-gray-600">Target Tanggal: {s.targetDate}</p>
+                <div className="mt-2 text-base">
+                  <span className="font-semibold">{formatCurrency(s.currentAmount, profile.currency)}</span>
+                  <span className="text-gray-500"> / {formatCurrency(s.targetAmount, profile.currency)}</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
+                  <div
+                    className={`h-3 rounded-full ${isCompleted ? 'bg-green-600' : 'bg-indigo-600'}`}
+                    style={{ width: `${Math.min(progress, 100)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs mt-1 text-gray-500">
+                  <span className="font-medium">{progress.toFixed(1)}% Tercapai</span>
+                  <span>{isCompleted ? 'Tercapai!' : `${remainingDays} hari tersisa`}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// --- Reports View Component ---
+const ReportsView: React.FC<{ transactions: Transaction[]; profile: UserProfile }> = ({ transactions, profile }) => {
+    // Aggregation for Bar Chart (Income vs Expense by Category)
+    const categoryComparisonData = useMemo(() => {
+        const dataMap: { [key: string]: { Pemasukan: number; Pengeluaran: number; name: string } } = {};
+        transactions.forEach(t => {
+            if (!dataMap[t.category]) {
+                dataMap[t.category] = { Pemasukan: 0, Pengeluaran: 0, name: t.category };
+            }
+            dataMap[t.category][t.type] += t.amount;
+        });
+        return Object.values(dataMap).filter(d => d.Pemasukan > 0 || d.Pengeluaran > 0);
+    }, [transactions]);
+
+
+    // Aggregation for Trend Chart (Monthly Balance)
+    const monthlyBalanceData = useMemo(() => {
+        const balanceMap: { [key: string]: number } = {}; // { '2024-10': 100000 }
+        const monthlyTransactions: { [key: string]: Transaction[] } = {};
+
+        transactions.forEach(t => {
+            const monthYear = t.date.substring(0, 7);
+            if (!monthlyTransactions[monthYear]) {
+                monthlyTransactions[monthYear] = [];
+            }
+            monthlyTransactions[monthYear].push(t);
+        });
+
+        const sortedMonths = Object.keys(monthlyTransactions).sort();
+
+        let runningBalance = 0;
+        return sortedMonths.map(monthYear => {
+            const monthNet = monthlyTransactions[monthYear].reduce((net, t) => {
+                return net + (t.type === 'Pemasukan' ? t.amount : -t.amount);
+            }, 0);
+            runningBalance += monthNet;
+            return {
+                name: monthYear,
+                'Saldo Akhir': runningBalance,
+                'Laba/Rugi Bulanan': monthNet
+            };
+        });
+    }, [transactions]);
+
+    return (
+        <div className="space-y-6">
+            <Card title="Laporan Saldo Akhir Berdasarkan Waktu">
+                <div className="h-80 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={monthlyBalanceData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                            <XAxis dataKey="name" stroke="#6b7280" />
+                            <YAxis tickFormatter={(value) => formatCurrency(value, profile.currency)} stroke="#6b7280" />
+                            <Tooltip formatter={(value: number) => formatCurrency(value, profile.currency)} />
+                            <Legend />
+                            <Line type="monotone" dataKey="Saldo Akhir" stroke="#10b981" activeDot={{ r: 8 }} strokeWidth={3} />
+                            <Line type="monotone" dataKey="Laba/Rugi Bulanan" stroke="#f59e0b" strokeWidth={1} dot={false} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+            </Card>
+
+            <Card title="Perbandingan Pemasukan & Pengeluaran per Kategori">
+                <div className="h-80 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={categoryComparisonData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                            <XAxis dataKey="name" stroke="#6b7280" />
+                            <YAxis tickFormatter={(value) => formatCurrency(value, profile.currency)} stroke="#6b7280" />
+                            <Tooltip formatter={(value: number) => formatCurrency(value, profile.currency)} />
+                            <Legend />
+                            <Line type="monotone" dataKey="Pemasukan" stroke="#059669" activeDot={{ r: 6 }} strokeWidth={2} />
+                            <Line type="monotone" dataKey="Pengeluaran" stroke="#ef4444" activeDot={{ r: 6 }} strokeWidth={2} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+            </Card>
+
+            <Card title="Tabel Detail Transaksi (Bisnis vs Pribadi)">
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deskripsi</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jenis</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Jumlah</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {transactions.filter(t => t.isBusiness).map(t => (
+                                <tr key={t.id + 'b'} className="bg-purple-50 hover:bg-purple-100">
+                                    <td className="px-6 py-3 text-sm text-gray-900">{t.date}</td>
+                                    <td className="px-6 py-3 text-sm text-gray-900">{t.description} (Bisnis)</td>
+                                    <td className={`px-6 py-3 text-sm font-medium ${t.type === 'Pemasukan' ? 'text-green-600' : 'text-red-600'}`}>{t.type}</td>
+                                    <td className={`px-6 py-3 text-sm text-right font-semibold ${t.type === 'Pemasukan' ? 'text-green-700' : 'text-red-700'}`}>
+                                        {formatCurrency(t.amount, profile.currency)}
+                                    </td>
+                                </tr>
+                            ))}
+                             {transactions.filter(t => !t.isBusiness).map(t => (
+                                <tr key={t.id + 'p'} className="hover:bg-gray-50">
+                                    <td className="px-6 py-3 text-sm text-gray-900">{t.date}</td>
+                                    <td className="px-6 py-3 text-sm text-gray-900">{t.description} (Pribadi)</td>
+                                    <td className={`px-6 py-3 text-sm font-medium ${t.type === 'Pemasukan' ? 'text-green-600' : 'text-red-600'}`}>{t.type}</td>
+                                    <td className={`px-6 py-3 text-sm text-right font-semibold ${t.type === 'Pemasukan' ? 'text-green-700' : 'text-red-700'}`}>
+                                        {formatCurrency(t.amount, profile.currency)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </Card>
+        </div>
+    );
+};
+
+// --- Profile View Component ---
+const ProfileView: React.FC<{ profile: UserProfile; onUpdate: (p: UserProfile) => void }> = ({ profile, onUpdate }) => {
+  const [tempProfile, setTempProfile] = useState(profile);
+
+  useEffect(() => {
+    setTempProfile(profile);
+  }, [profile]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    if (name === 'showBusiness' && type === 'checkbox') {
+      setTempProfile(prev => ({ ...prev, [name]: (e.target as HTMLInputElement).checked }));
+    } else {
+      setTempProfile(prev => ({ ...prev, [name]: value }));
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdate(tempProfile);
+    alert("Pengaturan profil berhasil disimpan!"); // Ganti dengan modal di lingkungan nyata
+  };
+
+  const alert = (message: string) => {
+    // Simulasi modal/notifikasi karena alert() tidak diizinkan
+    console.log("NOTIFIKASI: " + message);
+    const notificationBox = document.getElementById('notification-box');
+    if (notificationBox) {
+        notificationBox.innerHTML = `<div class="p-3 bg-green-100 text-green-700 rounded-lg shadow-lg mb-4">${message}</div>`;
+        setTimeout(() => notificationBox.innerHTML = '', 3000);
+    }
+  };
+
+  return (
+    <div className="max-w-xl mx-auto">
+        <div id="notification-box"></div>
+      <Card title="Pengaturan Akun dan Preferensi">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nama Pengguna</label>
+            <Input name="name" value={tempProfile.name} onChange={handleChange} required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mata Uang Default</label>
+            <Select name="currency" options={['IDR', 'USD', 'EUR', 'JPY']} value={tempProfile.currency} onChange={handleChange} required />
+          </div>
+          <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+            <input
+              id="showBusiness"
+              name="showBusiness"
+              type="checkbox"
+              checked={tempProfile.showBusiness}
+              onChange={handleChange}
+              className="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 border-gray-300"
+            />
+            <label htmlFor="showBusiness" className="text-sm font-medium text-gray-700">Tampilkan Transaksi Bisnis di Dashboard & Laporan</label>
+          </div>
+          <div className="pt-4">
+            <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white w-full">
+              <Edit className="w-4 h-4 mr-2" />
+              Simpan Perubahan
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+};
